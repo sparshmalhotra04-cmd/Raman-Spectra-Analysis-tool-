@@ -1,0 +1,133 @@
+import numpy as np
+from scipy.interpolate import interp1d
+
+def load_and_subtract_numpy(data_file, bg_file):
+    """
+    Loads data directly into NumPy arrays, aligns the Raman shifts, and subtracts the background.
+    """
+    print(f"\nLoading data from '{data_file}' \nand '{bg_file}' using NumPy...")
+    
+    raw_data = np.loadtxt(data_file)
+    bg_data = np.loadtxt(bg_file)
+
+    # Find the matching Raman shifts in both files
+    common_shifts, raw_indices, bg_indices = np.intersect1d(
+        raw_data[:, 0], bg_data[:, 0], return_indices=True
+    )
+
+    # Extract intensities and subtract
+    raw_intensities = raw_data[raw_indices, 1]
+    bg_intensities = bg_data[bg_indices, 1]
+    subtracted_intensities = raw_intensities - bg_intensities
+    
+    # Recombine
+    subtracted_array = np.column_stack((common_shifts, subtracted_intensities))
+    
+    print("\n--- Background Subtraction Complete ---")
+    print("Preview of the subtracted data (first 5 rows):")
+    print(subtracted_array[:5])
+    
+    return subtracted_array
+
+def interpolate_numpy(data_array):
+    """
+    Uses scipy.interpolate.interp1d to calculate integer-based Raman shifts and intensities.
+    """
+    print("\nStarting interpolation using scipy...")
+    
+    shifts = data_array[:, 0]
+    intensities = data_array[:, 1]
+    
+    min_x = int(np.ceil(np.min(shifts)))
+    max_x = int(np.floor(np.max(shifts)))
+    
+    new_x_integers = np.arange(min_x, max_x + 1)
+    
+    interp_function = interp1d(shifts, intensities, kind='linear')
+    new_y_intensities = interp_function(new_x_integers)
+    
+    final_array = np.column_stack((new_x_integers, new_y_intensities))
+    
+    print("\n--- Interpolation Complete ---")
+    return final_array
+
+def calculate_ratios(interpolated_data):
+    """
+    Calculates 4 specific biological marker ratios from the interpolated integer data.
+    """
+    print("\n--- Calculating Biological Ratios ---")
+    
+    # A quick helper function to grab the intensity for a specific Raman Shift
+    def get_intensity(target_shift):
+        # Find the row where the first column (shift) matches our target
+        row_index = np.where(interpolated_data[:, 0] == target_shift)[0]
+        
+        if len(row_index) > 0:
+            return interpolated_data[row_index[0], 1]
+        else:
+            print(f"  Warning: Raman shift {target_shift} not found in the data range.")
+            return None
+
+    # Retrieve all needed intensities
+    int_2140 = get_intensity(2140)
+    int_2180 = get_intensity(2180)
+    int_2850 = get_intensity(2850)
+    int_2940 = get_intensity(2940)
+    int_3005 = get_intensity(3005)
+
+    # Calculate and store the ratios if the data was found
+    ratios = {}
+    
+    if int_2850 is not None and int_2940 is not None:
+        ratios['Ratio 1 (2850 / 2940)'] = int_2850 / int_2940
+        
+    if int_2140 is not None and int_2850 is not None:
+        ratios['Ratio 2 (2140 / 2850)'] = int_2140 / int_2850
+        
+    if int_2180 is not None and int_2940 is not None:
+        ratios['Ratio 3 (2180 / 2940)'] = int_2180 / int_2940
+        
+    if int_3005 is not None and int_2850 is not None:
+        ratios['Ratio 4 (3005 / 2850)'] = int_3005 / int_2850
+
+    # Print out the results neatly
+    for name, value in ratios.items():
+        print(f"{name}: {value:.8f}")
+        
+    return ratios
+
+# --- Main Execution Block ---
+if __name__ == "__main__":
+    print("=== Raman Preprocessing Tool (NumPy Edition) ===")
+    
+    # 1. Prompt for file paths
+    data_filename = input("Please drag and drop your RAW data file here, then press Enter: ").strip(" '\"")
+    bg_filename = input("Please drag and drop your BACKGROUND data file here, then press Enter: ").strip(" '\"")
+    
+    # 2. Perform the subtraction
+    subtracted_data = load_and_subtract_numpy(data_filename, bg_filename)
+    
+    # 3. User Check & Verification
+    while True:
+        user_input = input("\nPlease check the subtracted data above. Type 'interpolate' to proceed, or 'exit' to stop: ").strip().lower()
+        
+        if user_input == 'interpolate':
+            # 4. Perform the interpolation
+            final_processed_data = interpolate_numpy(subtracted_data)
+            
+            # Save the final NumPy array to a text file
+            output_filename = "Processed_Gut_Oocyte_Data.txt"
+            np.savetxt(output_filename, final_processed_data, delimiter='\t', 
+                       header='Raman_Shift_Int\tInterpolated_Intensity', comments='')
+            
+            print(f"Final processed data successfully saved to '{output_filename}'.")
+            
+            # 5. Calculate and display the ratios
+            calculate_ratios(final_processed_data)
+            
+            break
+        elif user_input == 'exit':
+            print("Exiting script without interpolating.")
+            break
+        else:
+            print("Invalid input. Please type 'interpolate' or 'exit'.")
